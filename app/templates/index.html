@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}跨馆标本对照 · 任务列表{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>跨馆标本对照</h1>
+    <p class="muted">上传两馆同种标本目录，按采集号、县代码与采集日期建立候选配对，并给出可导入的确定配对。</p>
+  </div>
+</header>
+
+{% if error %}
+  <div class="alert alert-error" role="alert">
+    <strong>{{ error }}</strong>
+    {% if details %}
+      <ul class="detail-list">
+        {% for item in details %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+    <p class="muted small">本次上传未写入任何数据，原状态保持不变。</p>
+  </div>
+{% endif %}
+
+<section class="card">
+  <h2>新建对照</h2>
+  <form class="upload-form" method="post" action="/comparisons" enctype="multipart/form-data">
+    <div class="field">
+      <label for="a_file">甲馆 CSV</label>
+      <input id="a_file" name="a_file" type="file" accept=".csv,text/csv" required>
+      <p class="muted small">列：馆藏号、采集号、县代码、采集日期；同馆馆藏号不得重复。</p>
+    </div>
+    <div class="field">
+      <label for="b_file">乙馆 CSV</label>
+      <input id="b_file" name="b_file" type="file" accept=".csv,text/csv" required>
+    </div>
+    <button class="primary" type="submit">上传并计算</button>
+  </form>
+  <details class="hint">
+    <summary>CSV 格式说明</summary>
+    <p>支持 UTF-8（含 BOM）或 GB18030 编码；表头可用中文或常见英文别名，日期支持
+      <code>YYYY-MM-DD</code>、<code>YYYY/MM/DD</code>、<code>YYYYMMDD</code> 等格式。
+      馆藏号在两馆文件内部各自唯一；采集号与县代码相同且采集日期相差不超过 1 天才构成候选。</p>
+  </details>
+</section>
+
+<section class="card">
+  <h2>历史对照</h2>
+  {% if comparisons %}
+  <div class="table-wrap">
+    <table class="list-table">
+      <thead>
+        <tr>
+          <th>编号</th><th>创建时间</th><th>甲馆文件</th><th>乙馆文件</th>
+          <th class="num">确定配对</th><th class="num">日期差合计</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in comparisons %}
+        <tr>
+          <td>#{{ item.id }}</td>
+          <td class="muted">{{ item.created_at }}</td>
+          <td>{{ item.a_filename }} <span class="muted small">（{{ item.a_rows }} 行）</span></td>
+          <td>{{ item.b_filename }} <span class="muted small">（{{ item.b_rows }} 行）</span></td>
+          <td class="num">{{ item.selected_count }}</td>
+          <td class="num">{{ item.gap_sum }}</td>
+          <td><a class="button" href="/comparisons/{{ item.id }}">查看</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="muted">还没有对照任务。上传两份 CSV 开始。</p>
+  {% endif %}
+</section>
+{% endblock %}

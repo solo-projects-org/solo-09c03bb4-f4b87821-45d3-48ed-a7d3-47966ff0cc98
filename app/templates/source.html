@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}原文件 · {{ museum_label }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>{{ museum_label }}原始文件</h1>
+    <p class="muted">{{ filename }} · 对照 #{{ comparison.id }}</p>
+  </div>
+  <div class="head-actions">
+    <a class="button" href="/comparisons/{{ comparison.id }}">返回结果</a>
+  </div>
+</header>
+
+<section class="card">
+  {% if records %}
+  <div class="table-wrap">
+    <table class="source-table">
+      <thead>
+        <tr>
+          <th class="num">行号</th>
+          {% for cell in records[0][1] %}<th>{{ cell }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for line_no, record in records[1:] %}
+        <tr id="line-{{ line_no }}">
+          <td class="num muted">{{ line_no }}</td>
+          {% for cell in record %}<td class="mono">{{ cell }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="muted">找不到原始文件。</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,17 @@
+services:
+  catalog:
+    build: .
+    image: cross-museum-catalog:latest
+    container_name: cross-museum-catalog
+    ports:
+      - "8000:8000"
+    environment:
+      CATALOG_DB: /data/catalog.db
+    volumes:
+      - catalog-data:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  catalog-data:

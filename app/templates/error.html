@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ status_code }} · 跨馆标本对照{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>{{ status_code }}</h1>
+  <p>{{ message }}</p>
+  <p><a class="button" href="/">返回首页</a></p>
+</section>
+{% endblock %}

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}跨馆标本对照{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/">跨馆标本对照</a>
+    <span class="muted small">种质资源库数据员工作台</span>
+  </nav>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer muted small">
+    候选规则：采集号与县代码相同，采集日期相差 ≤ 1 天 · 目标：配对数量最多，其次日期差合计最小
+  </footer>
+</body>
+</html>

@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}对照 #{{ comparison.id }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div>
+    <h1>对照 #{{ comparison.id }}</h1>
+    <p class="muted">
+      甲馆 <strong>{{ comparison.a_filename }}</strong>（{{ comparison.a_rows }} 行） ·
+      乙馆 <strong>{{ comparison.b_filename }}</strong>（{{ comparison.b_rows }} 行） ·
+      结果计算于 {{ comparison.results_computed_at }}
+    </p>
+  </div>
+  <div class="head-actions">
+    <a class="button" href="/comparisons/{{ comparison.id }}/export.csv">下载确定配对 CSV</a>
+  </div>
+</header>
+
+{% if error %}
+  <div class="alert alert-error" role="alert">
+    <strong>操作未生效：</strong>{{ error }}
+    <p class="muted small">矛盾决定或重算失败时保留原有的决定与结果，可修正后再次提交。</p>
+  </div>
+{% endif %}
+{% if notice %}
+  <div class="alert alert-ok" role="status">{{ notice }}</div>
+{% endif %}
+{% if comparison.last_error %}
+  <div class="alert alert-warn" role="status">
+    <strong>上一次失败记录：</strong>{{ comparison.last_error }}
+  </div>
+{% endif %}
+
+<section class="stats">
+  <div class="stat"><span class="stat-label">确定配对</span><span class="stat-value">{{ counts.certain }}</span></div>
+  <div class="stat"><span class="stat-label">待核候选</span><span class="stat-value">{{ counts.uncertain }}</span></div>
+  <div class="stat"><span class="stat-label">未匹配</span><span class="stat-value">{{ counts.unmatched }}</span></div>
+  <div class="stat"><span class="stat-label">已排除</span><span class="stat-value">{{ counts.excluded }}</span></div>
+  <div class="stat"><span class="stat-label">入选配对 / 日期差合计</span><span class="stat-value">{{ comparison.selected_count }} <span class="muted">/ {{ comparison.gap_sum }} 天</span></span></div>
+</section>
+
+<section class="card">
+  <div class="toolbar">
+    <nav class="tabs">
+      {% for key, label in [('all','全部'), ('certain','确定'), ('uncertain','待核'), ('unmatched','未匹配'), ('excluded','已排除')] %}
+        <a class="tab {% if status == key %}active{% endif %}" href="/comparisons/{{ comparison.id }}?status={{ key }}">
+          {{ label }} <span class="pill">{{ counts[key] if key != 'all' else counts.all }}</span>
+        </a>
+      {% endfor %}
+    </nav>
+    <form method="post" action="/comparisons/{{ comparison.id }}/recompute" class="inline-form">
+      <input type="hidden" name="next" value="/comparisons/{{ comparison.id }}?status={{ status }}&page={{ page }}">
+      <button type="submit" class="secondary">按现有决定重新计算</button>
+    </form>
+  </div>
+
+  <p class="muted small legend">
+    <strong>确定</strong>：所有最优方案共有的配对，可导出导入。
+    <strong>待核</strong>：可能进入最优方案但归属不唯一，需人工确认或排除。
+    <strong>未匹配</strong>：不出现在任何最优方案中。
+    确认的配对会强制保留，排除的候选不再参与计算。
+  </p>
+
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="result-table">
+      <thead>
+        <tr>
+          <th>状态</th>
+          <th>甲馆馆藏号</th><th class="num">甲行号</th><th class="num">甲日期</th>
+          <th>乙馆馆藏号</th><th class="num">乙行号</th><th class="num">乙日期</th>
+          <th>采集号</th><th>县代码</th><th class="num">日期差</th>
+          <th>决定</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="status-{{ row.status }}">
+          <td><span class="badge badge-{{ row.status }}">{{ status_labels[row.status] }}</span></td>
+          <td class="mono">{{ row.a_collection }}</td>
+          <td class="num"><a href="/comparisons/{{ comparison.id }}/source/A#line-{{ row.a_line }}">{{ row.a_line }}</a></td>
+          <td class="num mono">{{ row.a_date }}</td>
+          <td class="mono">{{ row.b_collection }}</td>
+          <td class="num"><a href="/comparisons/{{ comparison.id }}/source/B#line-{{ row.b_line }}">{{ row.b_line }}</a></td>
+          <td class="num mono">{{ row.b_date }}</td>
+          <td class="mono">{{ row.field_number }}</td>
+          <td class="mono">{{ row.county_code }}</td>
+          <td class="num">{{ row.gap_days }}</td>
+          <td class="actions">
+            <form method="post" action="/comparisons/{{ comparison.id }}/decide" class="inline-form">
+              <input type="hidden" name="candidate_id" value="{{ row.candidate_id }}">
+              <input type="hidden" name="status" value="{{ status }}">
+              <input type="hidden" name="page" value="{{ page }}">
+              <input type="hidden" name="next" value="/comparisons/{{ comparison.id }}?status={{ status }}&page={{ page }}">
+              <button name="action" value="confirm" class="tiny {% if row.decision == 'confirm' %}chosen{% endif %}">确认</button>
+              <button name="action" value="exclude" class="tiny {% if row.decision == 'exclude' %}chosen{% endif %}">排除</button>
+              {% if row.decision %}
+                <button name="action" value="clear" class="tiny ghost">撤销</button>
+              {% endif %}
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pages > 1 %}
+  <nav class="pager">
+    {% if page > 1 %}
+      <a class="button" href="/comparisons/{{ comparison.id }}?status={{ status }}&page={{ page - 1 }}">上一页</a>
+    {% endif %}
+    <span class="muted">第 {{ page }} / {{ pages }} 页，共 {{ total }} 条</span>
+    {% if page < pages %}
+      <a class="button" href="/comparisons/{{ comparison.id }}?status={{ status }}&page={{ page + 1 }}">下一页</a>
+    {% endif %}
+  </nav>
+  {% else %}
+    <p class="muted small">共 {{ total }} 条</p>
+  {% endif %}
+  {% else %}
+    <p class="muted">此分类下没有候选配对。</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>原始文件</h2>
+  <p class="muted small">行号与结果表中的行号一致（表头为第 1 行）。</p>
+  <div class="source-links">
+    <a class="button" href="/comparisons/{{ comparison.id }}/source/A">查看甲馆原文件</a>
+    <a class="button" href="/comparisons/{{ comparison.id }}/source/B">查看乙馆原文件</a>
+  </div>
+</section>
+{% endblock %}
