@@ -10,7 +10,7 @@ import datetime as dt
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NamedTuple
 
 from . import domain
 from .matching import Candidate, DecisionConflict, Solution, solve_catalog
@@ -280,6 +280,64 @@ def get_comparison(db_path: str | Path, comparison_id: int) -> sqlite3.Row | Non
 
 STATUS_ORDER = {"certain": 0, "uncertain": 1, "unmatched": 2, "excluded": 3}
 
+_FILTER_STATUSES = ("certain", "uncertain", "unmatched", "excluded")
+
+_RESULT_PAGE_SQL = """
+    SELECT c.id AS candidate_id, c.gap_days, r.status, r.selected,
+           a.line_no AS a_line, a.collection_number AS a_collection,
+           a.field_number, a.county_code, a.collected_on AS a_date,
+           b.line_no AS b_line, b.collection_number AS b_collection,
+           b.collected_on AS b_date,
+           d.action AS decision
+    FROM candidates c
+    JOIN results r ON r.candidate_id = c.id
+    JOIN cat_rows a ON a.id = c.a_row_id
+    JOIN cat_rows b ON b.id = c.b_row_id
+    LEFT JOIN decisions d ON d.candidate_id = c.id
+    {where}
+    ORDER BY CASE r.status
+                WHEN 'certain' THEN 0 WHEN 'uncertain' THEN 1
+                WHEN 'unmatched' THEN 2 ELSE 3 END,
+             c.gap_days, a.line_no, b.line_no, c.id
+"""
+
+
+def _result_counts(conn: sqlite3.Connection, comparison_id: int) -> dict[str, int]:
+    counts = {"all": 0, "certain": 0, "uncertain": 0, "unmatched": 0, "excluded": 0}
+    for row in conn.execute(
+        "SELECT status, COUNT(*) AS n FROM results WHERE comparison_id = ? GROUP BY status",
+        (comparison_id,),
+    ):
+        counts[row["status"]] = row["n"]
+        counts["all"] += row["n"]
+    return counts
+
+
+def _result_where(comparison_id: int, status: str) -> tuple[str, list]:
+    where = "WHERE c.comparison_id = ?"
+    params: list = [comparison_id]
+    if status in _FILTER_STATUSES:
+        where += " AND r.status = ?"
+        params.append(status)
+    return where, params
+
+
+def _result_total(conn: sqlite3.Connection, where: str, params: list) -> int:
+    return conn.execute(
+        f"SELECT COUNT(*) FROM candidates c JOIN results r ON r.candidate_id = c.id {where}",
+        params,
+    ).fetchone()[0]
+
+
+def _result_rows(
+    conn: sqlite3.Connection, where: str, params: list, page: int, page_size: int
+) -> list[sqlite3.Row]:
+    offset = max(0, (page - 1) * page_size)
+    return conn.execute(
+        _RESULT_PAGE_SQL.format(where=where) + " LIMIT ? OFFSET ?",
+        [*params, page_size, offset],
+    ).fetchall()
+
 
 def fetch_result_page(
     db_path: str | Path,
@@ -288,48 +346,65 @@ def fetch_result_page(
     page: int = 1,
     page_size: int = 50,
 ) -> tuple[list[sqlite3.Row], int, dict[str, int]]:
+    """Read one page of results inside a single snapshot transaction."""
     conn = connect(db_path)
     try:
-        counts = {"all": 0, "certain": 0, "uncertain": 0, "unmatched": 0, "excluded": 0}
-        for row in conn.execute(
-            "SELECT status, COUNT(*) AS n FROM results WHERE comparison_id = ? GROUP BY status",
-            (comparison_id,),
-        ):
-            counts[row["status"]] = row["n"]
-            counts["all"] += row["n"]
-        where = "WHERE c.comparison_id = ?"
-        params: list = [comparison_id]
-        if status in ("certain", "uncertain", "unmatched", "excluded"):
-            where += " AND r.status = ?"
-            params.append(status)
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM candidates c JOIN results r ON r.candidate_id = c.id {where}",
-            params,
-        ).fetchone()[0]
-        offset = max(0, (page - 1) * page_size)
-        rows = conn.execute(
-            f"""
-            SELECT c.id AS candidate_id, c.gap_days, r.status, r.selected,
-                   a.line_no AS a_line, a.collection_number AS a_collection,
-                   a.field_number, a.county_code, a.collected_on AS a_date,
-                   b.line_no AS b_line, b.collection_number AS b_collection,
-                   b.collected_on AS b_date,
-                   d.action AS decision
-            FROM candidates c
-            JOIN results r ON r.candidate_id = c.id
-            JOIN cat_rows a ON a.id = c.a_row_id
-            JOIN cat_rows b ON b.id = c.b_row_id
-            LEFT JOIN decisions d ON d.candidate_id = c.id
-            {where}
-            ORDER BY CASE r.status
-                        WHEN 'certain' THEN 0 WHEN 'uncertain' THEN 1
-                        WHEN 'unmatched' THEN 2 ELSE 3 END,
-                     c.gap_days, a.line_no, b.line_no, c.id
-            LIMIT ? OFFSET ?
-            """,
-            [*params, page_size, offset],
-        ).fetchall()
+        conn.execute("BEGIN")
+        counts = _result_counts(conn, comparison_id)
+        where, params = _result_where(comparison_id, status)
+        total = _result_total(conn, where, params)
+        rows = _result_rows(conn, where, params, max(1, page), page_size)
+        conn.commit()
         return rows, total, counts
+    finally:
+        conn.close()
+
+
+class DetailPage(NamedTuple):
+    """Everything the detail page renders, from one committed snapshot."""
+
+    comparison: sqlite3.Row
+    rows: list[sqlite3.Row]
+    total: int
+    counts: dict[str, int]
+    page: int
+    pages: int
+
+
+def fetch_detail_page(
+    db_path: str | Path,
+    comparison_id: int,
+    status: str = "all",
+    page: int = 1,
+    page_size: int = 50,
+) -> DetailPage | None:
+    """Load the whole detail page from a single committed computation result.
+
+    The summary row, per-status counts, filtered total, page of candidates
+    and the curator decisions shown on each row are read inside one deferred
+    read transaction, so they always describe the same committed state even
+    when another instance commits a decision concurrently.  In WAL mode the
+    snapshot never blocks writers, and the transaction ends before this
+    function returns.  Out-of-range page numbers are clamped against this
+    same snapshot.  Returns ``None`` when the comparison does not exist.
+    """
+    conn = connect(db_path)
+    try:
+        conn.execute("BEGIN")
+        comparison = conn.execute(
+            "SELECT * FROM comparisons WHERE id = ?", (comparison_id,)
+        ).fetchone()
+        if comparison is None:
+            conn.rollback()
+            return None
+        counts = _result_counts(conn, comparison_id)
+        where, params = _result_where(comparison_id, status)
+        total = _result_total(conn, where, params)
+        pages = max(1, (total + page_size - 1) // page_size)
+        page = min(max(1, page), pages)
+        rows = _result_rows(conn, where, params, page, page_size)
+        conn.commit()
+        return DetailPage(comparison, rows, total, counts, page, pages)
     finally:
         conn.close()
 

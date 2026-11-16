@@ -119,34 +119,26 @@ def comparison_detail(
     notice: str = "",
     uploaded: int = 0,
 ):
-    comparison = db.get_comparison(get_db_path(), comparison_id)
-    if comparison is None:
-        raise HTTPException(status_code=404, detail="对照任务不存在")
     if status not in ("all", "certain", "uncertain", "unmatched", "excluded"):
         status = "all"
-    page = max(1, page)
-    rows, total, counts = db.fetch_result_page(
+    detail = db.fetch_detail_page(
         get_db_path(), comparison_id, status=status, page=page, page_size=PAGE_SIZE
     )
-    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    if page > pages and total > 0:
-        page = pages
-        rows, total, counts = db.fetch_result_page(
-            get_db_path(), comparison_id, status=status, page=page, page_size=PAGE_SIZE
-        )
+    if detail is None:
+        raise HTTPException(status_code=404, detail="对照任务不存在")
     if uploaded and not notice:
         notice = "文件已导入并完成首次计算"
     return templates.TemplateResponse(
         request,
         "detail.html",
         {
-            "comparison": comparison,
-            "rows": rows,
-            "total": total,
-            "counts": counts,
+            "comparison": detail.comparison,
+            "rows": detail.rows,
+            "total": detail.total,
+            "counts": detail.counts,
             "status": status,
-            "page": page,
-            "pages": pages,
+            "page": detail.page,
+            "pages": detail.pages,
             "status_labels": STATUS_LABELS,
             "error": error,
             "notice": notice,
